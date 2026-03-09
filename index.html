@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>รายงานการโอนเงินรายกองทุน รพ.โพนทอง</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js DataLabels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- PapaParse for CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- SheetJS for Excel Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { prompt: ['Prompt', 'sans-serif'] },
+                    colors: {
+                        primary: '#1e3a8a', // ฟ้าเข้ม
+                        secondary: '#3b82f6',
+                        glass: 'rgba(255, 255, 255, 0.85)'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Prompt', sans-serif; background-color: #f0f7ff; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
+        }
+        .loader {
+            border: 5px solid #f3f3f3; border-top: 5px solid #1e3a8a;
+            border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen text-slate-800">
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-white/80 z-50 flex flex-col justify-center items-center hidden backdrop-blur-sm">
+        <div class="loader mb-4"></div>
+        <h2 class="text-xl font-semibold text-primary animate-pulse" id="loadingText">กำลังโหลดข้อมูล...</h2>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-primary text-white shadow-lg sticky top-0 z-30">
+        <div class="container mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center">
+            <div class="flex items-center gap-3">
+                <i class="fas fa-hospital text-3xl"></i>
+                <div>
+                    <h1 class="text-2xl font-bold">รายงานการโอนเงินรายกองทุน</h1>
+                    <p class="text-sm text-blue-200">ปีงบประมาณ 2569 | โรงพยาบาลโพนทอง</p>
+                </div>
+            </div>
+            <div class="mt-4 md:mt-0 flex flex-wrap gap-2">
+                <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+                <button onclick="document.getElementById('csvFileInput').click()" class="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg transition shadow flex items-center gap-2 text-sm font-medium">
+                    <i class="fas fa-file-import"></i> นำเข้าข้อมูล (CSV)
+                </button>
+                <button onclick="exportToExcel()" class="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded-lg transition shadow flex items-center gap-2 text-sm font-medium text-white">
+                    <i class="fas fa-file-excel"></i> ส่งออก (Excel)
+                </button>
+                <button onclick="openModal('add')" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg transition shadow flex items-center gap-2 text-sm font-medium">
+                    <i class="fas fa-plus"></i> เพิ่มข้อมูล
+                </button>
+                <button onclick="fetchData()" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition shadow flex items-center gap-2 text-sm font-medium">
+                    <i class="fas fa-sync-alt"></i> รีเฟรช
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow container mx-auto px-4 py-6 space-y-6">
+        
+        <!-- Filter Section -->
+        <section class="glass-card rounded-2xl p-4 flex flex-col md:flex-row gap-4 items-end">
+            <div class="w-full md:w-1/3">
+                <label class="block text-sm font-medium text-slate-600 mb-1">กองทุน</label>
+                <select id="filterFund" onchange="updateSubFundDropdown()" class="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-primary outline-none">
+                    <option value="all">-- ทั้งหมด --</option>
+                </select>
+            </div>
+            <div class="w-full md:w-1/3">
+                <label class="block text-sm font-medium text-slate-600 mb-1">กองทุนย่อยเฉพาะด้าน</label>
+                <select id="filterSubFund" class="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-primary outline-none">
+                    <option value="all">-- ทั้งหมด --</option>
+                </select>
+            </div>
+            <div class="w-full md:w-1/4">
+                <label class="block text-sm font-medium text-slate-600 mb-1">เดือนที่โอน</label>
+                <select id="filterMonth" class="w-full rounded-lg border-gray-300 border p-2 focus:ring-2 focus:ring-primary outline-none">
+                    <option value="all">-- ทั้งหมด --</option>
+                </select>
+            </div>
+            <div class="w-full md:w-auto">
+                <button onclick="applyFilters()" class="w-full bg-secondary hover:bg-blue-600 text-white px-6 py-2 rounded-lg transition shadow">
+                    กรองข้อมูล
+                </button>
+            </div>
+        </section>
+
+        <!-- KPI Glass Cards -->
+        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div class="glass-card rounded-2xl p-5 border-t-4 border-t-blue-500">
+                <p class="text-slate-500 text-sm font-medium mb-1">จำนวนเงินรวมทั้งหมด</p>
+                <h3 class="text-2xl font-bold text-slate-800" id="kpiTotalAmt">0.00</h3>
+                <p class="text-xs text-slate-400 mt-2">บาท</p>
+            </div>
+            <div class="glass-card rounded-2xl p-5 border-t-4 border-t-green-500">
+                <p class="text-slate-500 text-sm font-medium mb-1">เงินโอนเข้าบัญชี</p>
+                <h3 class="text-2xl font-bold text-slate-800" id="kpiTransferAmt">0.00</h3>
+                <p class="text-xs text-slate-400 mt-2">บาท</p>
+            </div>
+            <div class="glass-card rounded-2xl p-5 border-t-4 border-t-purple-500">
+                <p class="text-slate-500 text-sm font-medium mb-1">กองทุนทั้งหมด</p>
+                <h3 class="text-2xl font-bold text-slate-800" id="kpiFundCount">0</h3>
+                <p class="text-xs text-slate-400 mt-2">กองทุน</p>
+            </div>
+            <div class="glass-card rounded-2xl p-5 border-t-4 border-t-orange-500">
+                <p class="text-slate-500 text-sm font-medium mb-1">โอนเงินแล้ว</p>
+                <h3 class="text-2xl font-bold text-slate-800" id="kpiTransferCount">0</h3>
+                <p class="text-xs text-slate-400 mt-2">รายการ (อ้างอิงลำดับ)</p>
+            </div>
+            <div class="glass-card rounded-2xl p-5 border-t-4 border-t-pink-500">
+                <p class="text-slate-500 text-sm font-medium mb-1">งวดเบิกจ่าย</p>
+                <h3 class="text-2xl font-bold text-slate-800" id="kpiPeriodCount">0</h3>
+                <p class="text-xs text-slate-400 mt-2">งวด</p>
+            </div>
+        </section>
+
+        <!-- Charts Area -->
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Line Chart (Full Width on mobile, 2/3 on desktop) -->
+            <div class="glass-card rounded-2xl p-5 lg:col-span-2">
+                <h3 class="text-lg font-semibold text-slate-700 mb-4"><i class="fas fa-chart-line text-secondary mr-2"></i>แนวโน้มเงินโอนเข้าบัญชีรายเดือน</h3>
+                <div class="relative h-64 w-full">
+                    <canvas id="lineChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Donut Chart -->
+            <div class="glass-card rounded-2xl p-5">
+                <h3 class="text-lg font-semibold text-slate-700 mb-4"><i class="fas fa-chart-pie text-secondary mr-2"></i>สัดส่วนสถานการณ์โอนเงิน</h3>
+                <div class="relative h-64 w-full flex justify-center">
+                    <canvas id="donutChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Bar Chart (Full Width) -->
+            <div class="glass-card rounded-2xl p-5 lg:col-span-3">
+                <h3 class="text-lg font-semibold text-slate-700 mb-4"><i class="fas fa-chart-bar text-secondary mr-2"></i>ยอดเบิกจ่ายรายกองทุน</h3>
+                <div class="relative h-80 w-full">
+                    <canvas id="barChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Table -->
+        <section class="glass-card rounded-2xl p-5 overflow-hidden flex flex-col">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+                <h3 class="text-lg font-semibold text-slate-700"><i class="fas fa-table text-secondary mr-2"></i>ตารางข้อมูลรายละเอียด</h3>
+                <div class="flex items-center gap-2 text-sm">
+                    <label>แสดง</label>
+                    <select id="rowsPerPage" class="border rounded p-1 outline-none" onchange="changeRowsPerPage()">
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                    <label>รายการ</label>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto rounded-lg border border-slate-200">
+                <table class="w-full text-sm text-left">
+                    <thead class="bg-slate-100 text-slate-600 font-medium">
+                        <tr>
+                            <th class="px-4 py-3 whitespace-nowrap">ลำดับ</th>
+                            <th class="px-4 py-3 whitespace-nowrap">วันที่โอน</th>
+                            <th class="px-4 py-3 whitespace-nowrap">Batch No.</th>
+                            <th class="px-4 py-3 min-w-[150px]">งวด/เลขที่เบิกจ่าย</th>
+                            <th class="px-4 py-3 min-w-[150px]">กองทุน</th>
+                            <th class="px-4 py-3 min-w-[200px]">กองทุนย่อย</th>
+                            <th class="px-4 py-3 text-right whitespace-nowrap">จำนวนเงิน</th>
+                            <th class="px-4 py-3 text-right whitespace-nowrap">เงินโอนเข้าบัญชี</th>
+                            <th class="px-4 py-3 text-center whitespace-nowrap">จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-100 bg-white">
+                        <!-- Table Rows injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="flex justify-between items-center mt-4 text-sm">
+                <div class="text-slate-500" id="pageInfo">แสดง 0 ถึง 0 จาก 0 รายการ</div>
+                <div class="flex gap-1" id="paginationControls">
+                    <!-- Pagination Buttons -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-primary text-white py-6 mt-8">
+        <div class="container mx-auto px-4 text-center">
+            <p class="font-light text-sm md:text-base opacity-90">
+                พัฒนาโดย นางสาวนภาจรัส พรมรี นักสาธารณสุขชำนาญการ <br class="md:hidden">ศูนย์จัดเก็บรายได้ รพ.โพนทอง สสจ.ร้อยเอ็ด
+            </p>
+        </div>
+    </footer>
+
+    <!-- Form Modal (Add/Edit) -->
+    <div id="formModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center hidden backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-3xl p-6 shadow-2xl max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 class="text-xl font-bold text-primary" id="modalTitle">เพิ่มข้อมูลใหม่</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-red-500 text-2xl leading-none">&times;</button>
+            </div>
+            
+            <div class="overflow-y-auto pr-2 flex-grow">
+                <form id="dataForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="hidden" id="f_rowNum">
+                    
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">ลำดับ</label><input type="text" id="f_ลำดับ" class="w-full border rounded p-2 text-sm" required></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">วันที่โอน (เช่น 09 มี.ค. 2569)</label><input type="text" id="f_วันที่โอน" class="w-full border rounded p-2 text-sm" required></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">Batch No.</label><input type="text" id="f_BatchNo" class="w-full border rounded p-2 text-sm" required></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">งวด/เลขที่เบิกจ่าย</label><input type="text" id="f_งวด" class="w-full border rounded p-2 text-sm" required></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">รหัสผังบัญชี</label><input type="text" id="f_รหัสผัง" class="w-full border rounded p-2 text-sm"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">กองทุน</label><input type="text" id="f_กองทุน" class="w-full border rounded p-2 text-sm" required></div>
+                    <div class="md:col-span-2"><label class="block text-xs font-semibold mb-1 text-slate-600">กองทุนย่อยเฉพาะด้าน</label><input type="text" id="f_กองทุนย่อย" class="w-full border rounded p-2 text-sm" required></div>
+                    
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">จำนวนเงิน</label><input type="number" step="0.01" id="f_จำนวนเงิน" class="w-full border rounded p-2 text-sm" required value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">ชะลอการโอน</label><input type="number" step="0.01" id="f_ชะลอการโอน" class="w-full border rounded p-2 text-sm" value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">หักจากยอดโอน</label><input type="number" step="0.01" id="f_รายการหัก" class="w-full border rounded p-2 text-sm" value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">หลักประกันสัญญา</label><input type="number" step="0.01" id="f_หลักประกัน" class="w-full border rounded p-2 text-sm" value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">ภาษี</label><input type="number" step="0.01" id="f_ภาษี" class="w-full border rounded p-2 text-sm" value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">คงเหลือ</label><input type="number" step="0.01" id="f_คงเหลือ" class="w-full border rounded p-2 text-sm" value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">เงินรอหักกลบ</label><input type="number" step="0.01" id="f_รอหักกลบ" class="w-full border rounded p-2 text-sm" value="0"></div>
+                    <div><label class="block text-xs font-semibold mb-1 text-slate-600">เงินโอนเข้าบัญชี</label><input type="number" step="0.01" id="f_เงินโอน" class="w-full border rounded p-2 text-sm" required value="0"></div>
+                </form>
+            </div>
+            
+            <div class="border-t pt-4 mt-4 flex justify-end gap-2">
+                <button onclick="closeModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-6 py-2 rounded-lg transition">ยกเลิก</button>
+                <button onclick="saveData()" class="bg-primary hover:bg-blue-800 text-white px-6 py-2 rounded-lg transition shadow">บันทึกข้อมูล</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN LOGIC -->
+    <script>
+    (function() {
+        // [SECURITY] Obfuscated Web App URL base64 encoded.
+        // แก้ไข: เติมตัวอักษร z กลับเข้าไปให้ตรงกับลิงก์ URL จริง
+        const _O = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J6SGRLQTFFOXQ4TFpYZ3MxWm9xcXNxbllkNTAySHFQQ1RWUXpPS2kydDFFS1F6R0FPczQ5empzV1RSLUxaeTd6d3pYQS9leGVj";
+        const API_URL = atob(_O); 
+
+        // State Variables
+        let rawData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        let rowsPerPage = 10;
+        
+        // Chart Instances
+        let chartLine, chartDonut, chartBar;
+
+        // --- Initialization ---
+        window.onload = () => {
+            initCharts();
+            setupCSVUpload();
+            fetchData();
+        };
+
+        // --- Data Fetching (GAS) ---
+        window.fetchData = async function() {
+            showLoading("กำลังโหลดข้อมูลจากฐานข้อมูล...");
+            try {
+                const response = await fetch(API_URL, { redirect: "follow" });
+                const text = await response.text();
+                
+                try {
+                    const result = JSON.parse(text);
+                    if (result.status === 'success') {
+                        rawData = result.data;
+                        populateFilters();
+                        applyFilters();
+                    } else {
+                        throw new Error(result.message);
+                    }
+                } catch(e) {
+                    throw new Error("ข้อมูลตอบกลับผิดพลาด (ตรวจสอบการ Deploy GAS หรือสิทธิ์การเข้าถึง): " + e.message);
+                }
+            } catch (error) {
+                console.error("Fetch Error: ", error);
+                Swal.fire('การเชื่อมต่อล้มเหลว', 'ไม่สามารถดึงข้อมูลได้ โปรดตรวจสอบ URL ของ Google Apps Script หรือการตั้งค่าสิทธิ์', 'error');
+                
+                // Fallback: ตั้งค่าข้อมูลว่างเปล่าเพื่อให้หน้าต่าง UI ทำงานต่อได้โดยไม่ Error ค้าง
+                rawData = [];
+                populateFilters();
+                applyFilters();
+            } finally {
+                hideLoading();
+            }
+        };
+
+        // --- Filters & Render ---
+        function populateFilters() {
+            const funds = new Set();
+            const months = new Set();
+
+            rawData.forEach(d => {
+                if(d['กองทุน']) funds.add(d['กองทุน']);
+                if(d['วันที่โอน']) {
+                    let parts = d['วันที่โอน'].split(' ');
+                    if(parts.length >= 3) months.add(parts[1] + " " + parts[2]); // e.g. มี.ค. 2569
+                }
+            });
+
+            populateSelect('filterFund', Array.from(funds).sort());
+            populateSelect('filterMonth', Array.from(months).sort((a,b) => parseThaiMonthYear(a) - parseThaiMonthYear(b)));
+            
+            // อัปเดตกองทุนย่อยให้สอดคล้องกับกองทุนหลักเริ่มต้น (ทั้งหมด)
+            updateSubFundDropdown();
+        }
+
+        window.updateSubFundDropdown = function() {
+            const selectedFund = document.getElementById('filterFund').value;
+            const subFunds = new Set();
+            
+            rawData.forEach(d => {
+                // ถ้ายืนยันกองทุนหลัก หรือไม่ได้เลือกกองทุนหลัก(ทั้งหมด) ให้ดึงกองทุนย่อยมาแสดง
+                if (selectedFund === 'all' || d['กองทุน'] === selectedFund) {
+                    if (d['กองทุนย่อยเฉพาะด้าน']) {
+                        subFunds.add(d['กองทุนย่อยเฉพาะด้าน']);
+                    }
+                }
+            });
+            
+            populateSelect('filterSubFund', Array.from(subFunds).sort());
+        };
+
+        function populateSelect(id, items) {
+            const el = document.getElementById(id);
+            el.innerHTML = '<option value="all">-- ทั้งหมด --</option>';
+            items.forEach(item => {
+                el.innerHTML += `<option value="${item}">${item}</option>`;
+            });
+        }
+
+        window.applyFilters = function() {
+            const fFund = document.getElementById('filterFund').value;
+            const fSubFund = document.getElementById('filterSubFund').value;
+            const fMonth = document.getElementById('filterMonth').value;
+
+            filteredData = rawData.filter(d => {
+                let matchFund = fFund === 'all' || d['กองทุน'] === fFund;
+                let matchSubFund = fSubFund === 'all' || d['กองทุนย่อยเฉพาะด้าน'] === fSubFund;
+                let matchMonth = true;
+                if(fMonth !== 'all' && d['วันที่โอน']) {
+                    let parts = d['วันที่โอน'].split(' ');
+                    if(parts.length >= 3) {
+                        matchMonth = (parts[1] + " " + parts[2]) === fMonth;
+                    }
+                }
+                return matchFund && matchSubFund && matchMonth;
+            });
+
+            currentPage = 1;
+            updateKPIs();
+            updateCharts();
+            renderTable();
+        };
+
+        // --- KPI Updates ---
+        function updateKPIs() {
+            let totalAmt = 0;
+            let transferAmt = 0;
+            let uniqueFunds = new Set();
+            let uniqueSequence = new Set();
+            let uniquePeriods = new Set();
+
+            filteredData.forEach(d => {
+                totalAmt += parseFloat(d['จำนวนเงิน'] || 0);
+                transferAmt += parseFloat(d['เงินโอนเข้าบัญชี'] || 0);
+                if(d['กองทุน']) uniqueFunds.add(d['กองทุน']);
+                if(d['ลำดับ'] && parseFloat(d['เงินโอนเข้าบัญชี'] || 0) > 0) uniqueSequence.add(d['ลำดับ']);
+                if(d['งวด/เลขที่เบิกจ่าย']) uniquePeriods.add(d['งวด/เลขที่เบิกจ่าย']);
+            });
+
+            document.getElementById('kpiTotalAmt').innerText = formatNum(totalAmt);
+            document.getElementById('kpiTransferAmt').innerText = formatNum(transferAmt);
+            document.getElementById('kpiFundCount').innerText = formatNum(uniqueFunds.size);
+            document.getElementById('kpiTransferCount').innerText = formatNum(uniqueSequence.size);
+            document.getElementById('kpiPeriodCount').innerText = formatNum(uniquePeriods.size);
+        }
+
+        // --- Charts Generation ---
+        function initCharts() {
+            Chart.defaults.font.family = "'Prompt', sans-serif";
+            Chart.register(ChartDataLabels); // ลงทะเบียน Plugin สำหรับแสดงตัวเลขบนกราฟ
+
+            const lineCtx = document.getElementById('lineChart').getContext('2d');
+            const donutCtx = document.getElementById('donutChart').getContext('2d');
+            const barCtx = document.getElementById('barChart').getContext('2d');
+
+            chartLine = new Chart(lineCtx, {
+                type: 'line',
+                data: { labels: [], datasets: [] },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    plugins: { 
+                        legend: {display: false},
+                        datalabels: { display: false }, // ซ่อนตัวเลขบนกราฟเส้น
+                        tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatNum(ctx.raw); } } }
+                    },
+                    scales: { y: { ticks: { callback: function(val) { return formatNum(val); } } } }
+                }
+            });
+
+            chartDonut = new Chart(donutCtx, {
+                type: 'doughnut',
+                data: { labels: [], datasets: [] },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    cutout: '60%',
+                    plugins: {
+                        datalabels: { display: false }, // ซ่อนตัวเลขบนกราฟโดนัท
+                        tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + Number(ctx.raw).toLocaleString('th-TH') + ' รายการ'; } } }
+                    }
+                }
+            });
+
+            chartBar = new Chart(barCtx, {
+                type: 'bar',
+                data: { labels: [], datasets: [] },
+                options: { 
+                    indexAxis: 'y', 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    layout: { padding: { right: 50 } }, // เพิ่มระยะขอบขวาป้องกันตัวเลขตกขอบ
+                    plugins: { 
+                        legend: {display: false},
+                        datalabels: {
+                            display: true,
+                            anchor: 'end',
+                            align: 'right',
+                            color: '#334155',
+                            font: { size: 11, weight: '500' },
+                            formatter: function(val) { return formatNum(val); } // แสดงค่า K, M ท้ายแท่งกราฟ
+                        },
+                        tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatNum(ctx.raw); } } }
+                    },
+                    scales: { x: { ticks: { callback: function(val) { return formatNum(val); } } } }
+                }
+            });
+        }
+
+        function updateCharts() {
+            // 1. Line Chart (Monthly Trend)
+            let monthData = {};
+            filteredData.forEach(d => {
+                if(d['วันที่โอน']) {
+                    let parts = d['วันที่โอน'].split(' ');
+                    if(parts.length >= 3) {
+                        let m = parts[1] + " " + parts[2].substring(2); // e.g. มี.ค. 69
+                        monthData[m] = (monthData[m] || 0) + parseFloat(d['เงินโอนเข้าบัญชี'] || 0);
+                    }
+                }
+            });
+            // Sort keys chronologically
+            let sortedMonths = Object.keys(monthData).sort((a,b) => parseThaiMonthYear(a) - parseThaiMonthYear(b));
+            let lineValues = sortedMonths.map(m => monthData[m]);
+
+            chartLine.data = {
+                labels: sortedMonths,
+                datasets: [{
+                    label: 'เงินโอนเข้าบัญชี', data: lineValues,
+                    borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    borderWidth: 2, fill: true, tension: 0.3, pointBackgroundColor: '#1e3a8a'
+                }]
+            };
+            chartLine.update();
+
+            // 2. Bar Chart (Fund Disbursement)
+            let fundData = {};
+            filteredData.forEach(d => {
+                let fund = d['กองทุน'] || 'ไม่ระบุ';
+                fundData[fund] = (fundData[fund] || 0) + parseFloat(d['จำนวนเงิน'] || 0);
+            });
+            let sortedFunds = Object.keys(fundData).sort((a,b) => fundData[b] - fundData[a]); // Descending
+            
+            chartBar.data = {
+                labels: sortedFunds,
+                datasets: [{
+                    label: 'ยอดเบิกจ่าย', data: sortedFunds.map(f => fundData[f]),
+                    backgroundColor: '#10b981', borderRadius: 4
+                }]
+            };
+            chartBar.update();
+
+            // 3. Donut Chart (Status)
+            let sSuccess = 0, sDelayed = 0, sPending = 0;
+            filteredData.forEach(d => {
+                let trans = parseFloat(d['เงินโอนเข้าบัญชี'] || 0);
+                let delay = parseFloat(d['ชะลอการโอน'] || 0);
+                
+                if (trans > 0) sSuccess++;
+                else if (delay > 0) sDelayed++;
+                else sPending++;
+            });
+
+            chartDonut.data = {
+                labels: ['โอนแล้ว', 'ชะลอการโอน', 'ดำเนินการ'],
+                datasets: [{
+                    data: [sSuccess, sDelayed, sPending],
+                    backgroundColor: ['#10b981', '#f59e0b', '#3b82f6'],
+                    borderWidth: 0
+                }]
+            };
+            chartDonut.update();
+        }
+
+        // --- Table & Pagination ---
+        window.changeRowsPerPage = function() {
+            rowsPerPage = parseInt(document.getElementById('rowsPerPage').value);
+            currentPage = 1;
+            renderTable();
+        };
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            
+            let start = (currentPage - 1) * rowsPerPage;
+            let end = start + rowsPerPage;
+            let paginated = filteredData.slice(start, end);
+
+            if(paginated.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4 text-slate-500">ไม่พบข้อมูล</td></tr>`;
+            } else {
+                paginated.forEach(d => {
+                    let tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-50 transition";
+                    tr.innerHTML = `
+                        <td class="px-4 py-3">${d['ลำดับ'] || '-'}</td>
+                        <td class="px-4 py-3">${d['วันที่โอน'] || '-'}</td>
+                        <td class="px-4 py-3">${d['Batch No.'] || '-'}</td>
+                        <td class="px-4 py-3">${d['งวด/เลขที่เบิกจ่าย'] || '-'}</td>
+                        <td class="px-4 py-3 truncate max-w-[150px]" title="${d['กองทุน']}">${d['กองทุน'] || '-'}</td>
+                        <td class="px-4 py-3 truncate max-w-[200px]" title="${d['กองทุนย่อยเฉพาะด้าน']}">${d['กองทุนย่อยเฉพาะด้าน'] || '-'}</td>
+                        <td class="px-4 py-3 text-right text-blue-600 font-medium">${formatNum(d['จำนวนเงิน'])}</td>
+                        <td class="px-4 py-3 text-right text-green-600 font-medium">${formatNum(d['เงินโอนเข้าบัญชี'])}</td>
+                        <td class="px-4 py-3 text-center">
+                            <button onclick="editRow(${d._rowNum})" class="text-orange-500 hover:bg-orange-100 p-1 rounded mx-1"><i class="fas fa-edit"></i></button>
+                            <button onclick="deleteRow(${d._rowNum})" class="text-red-500 hover:bg-red-100 p-1 rounded mx-1"><i class="fas fa-trash"></i></button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            // Update Info & Controls
+            document.getElementById('pageInfo').innerText = `แสดง ${filteredData.length > 0 ? start+1 : 0} ถึง ${Math.min(end, filteredData.length)} จาก ${filteredData.length} รายการ`;
+            
+            let totalPages = Math.ceil(filteredData.length / rowsPerPage);
+            let pCtrl = document.getElementById('paginationControls');
+            pCtrl.innerHTML = '';
+            
+            if(totalPages > 1) {
+                pCtrl.innerHTML += `<button onclick="goToPage(${currentPage-1})" class="px-2 py-1 rounded border ${currentPage===1 ? 'text-slate-300' : 'hover:bg-slate-100'}" ${currentPage===1?'disabled':''}>ก่อนหน้า</button>`;
+                pCtrl.innerHTML += `<span class="px-3 py-1 bg-primary text-white rounded">${currentPage} / ${totalPages}</span>`;
+                pCtrl.innerHTML += `<button onclick="goToPage(${currentPage+1})" class="px-2 py-1 rounded border ${currentPage===totalPages ? 'text-slate-300' : 'hover:bg-slate-100'}" ${currentPage===totalPages?'disabled':''}>ถัดไป</button>`;
+            }
+        }
+
+        window.goToPage = function(p) {
+            let totalPages = Math.ceil(filteredData.length / rowsPerPage);
+            if(p >= 1 && p <= totalPages) {
+                currentPage = p;
+                renderTable();
+            }
+        };
+
+        // --- CRUD Operations ---
+        let actionType = 'add';
+        
+        window.openModal = function(type, rowNum = null) {
+            actionType = type;
+            document.getElementById('dataForm').reset();
+            
+            if(type === 'edit' && rowNum) {
+                document.getElementById('modalTitle').innerText = 'แก้ไขข้อมูล';
+                let rowData = rawData.find(r => r._rowNum === rowNum);
+                if(rowData) {
+                    document.getElementById('f_rowNum').value = rowData._rowNum;
+                    document.getElementById('f_ลำดับ').value = rowData['ลำดับ'] || '';
+                    document.getElementById('f_วันที่โอน').value = rowData['วันที่โอน'] || '';
+                    document.getElementById('f_BatchNo').value = rowData['Batch No.'] || '';
+                    document.getElementById('f_งวด').value = rowData['งวด/เลขที่เบิกจ่าย'] || '';
+                    document.getElementById('f_รหัสผัง').value = rowData['รหัสผังบัญชี สป.สธ.'] || '';
+                    document.getElementById('f_กองทุน').value = rowData['กองทุน'] || '';
+                    document.getElementById('f_กองทุนย่อย').value = rowData['กองทุนย่อยเฉพาะด้าน'] || '';
+                    
+                    document.getElementById('f_จำนวนเงิน').value = rowData['จำนวนเงิน'] || 0;
+                    document.getElementById('f_ชะลอการโอน').value = rowData['ชะลอการโอน'] || 0;
+                    document.getElementById('f_รายการหัก').value = rowData['รายการหักจากยอดโอนเงิน'] || 0;
+                    document.getElementById('f_หลักประกัน').value = rowData['หลักประกันสัญญา'] || 0;
+                    document.getElementById('f_ภาษี').value = rowData['ภาษี'] || 0;
+                    document.getElementById('f_คงเหลือ').value = rowData['คงเหลือ'] || 0;
+                    document.getElementById('f_รอหักกลบ').value = rowData['จำนวนเงินรอหักกลบ'] || 0;
+                    document.getElementById('f_เงินโอน').value = rowData['เงินโอนเข้าบัญชี'] || 0;
+                }
+            } else {
+                document.getElementById('modalTitle').innerText = 'เพิ่มข้อมูลใหม่';
+            }
+            document.getElementById('formModal').classList.remove('hidden');
+        };
+
+        window.closeModal = function() {
+            document.getElementById('formModal').classList.add('hidden');
+        };
+
+        window.editRow = function(rowNum) {
+            openModal('edit', rowNum);
+        };
+
+        window.deleteRow = function(rowNum) {
+            Swal.fire({
+                title: 'ยืนยันการลบ?',
+                text: "ข้อมูลนี้จะถูกลบออกจากระบบและ Google Sheet ทันที!",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'ใช่, ลบเลย!',
+                cancelButtonText: 'ยกเลิก'
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    showLoading("กำลังลบข้อมูล...");
+                    try {
+                        const res = await fetch(API_URL, {
+                            method: 'POST', body: JSON.stringify({ action: 'delete', rowNum: rowNum })
+                        });
+                        const resData = await res.json();
+                        if(resData.status === 'success') {
+                            Swal.fire('สำเร็จ', 'ลบข้อมูลเรียบร้อยแล้ว', 'success');
+                            fetchData(); // Reload
+                        } else throw new Error(resData.message);
+                    } catch(err) {
+                        Swal.fire('ผิดพลาด', err.message, 'error');
+                    } finally { hideLoading(); }
+                }
+            });
+        };
+
+        window.saveData = async function() {
+            // Validate basic
+            if(!document.getElementById('f_ลำดับ').value || !document.getElementById('f_กองทุน').value) {
+                Swal.fire('แจ้งเตือน', 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน', 'warning'); return;
+            }
+
+            // Prepare array structure matching Sheet Headers
+            const headers = ['ลำดับ', 'วันที่โอน', 'Batch No.', 'งวด/เลขที่เบิกจ่าย', 'รหัสผังบัญชี สป.สธ.', 'กองทุน', 'กองทุนย่อยเฉพาะด้าน', 'จำนวนเงิน', 'ชะลอการโอน', 'รายการหักจากยอดโอนเงิน', 'หลักประกันสัญญา', 'ภาษี', 'คงเหลือ', 'จำนวนเงินรอหักกลบ', 'เงินโอนเข้าบัญชี'];
+            
+            let formDataArray = [
+                document.getElementById('f_ลำดับ').value,
+                document.getElementById('f_วันที่โอน').value,
+                document.getElementById('f_BatchNo').value,
+                document.getElementById('f_งวด').value,
+                document.getElementById('f_รหัสผัง').value,
+                document.getElementById('f_กองทุน').value,
+                document.getElementById('f_กองทุนย่อย').value,
+                parseFloat(document.getElementById('f_จำนวนเงิน').value || 0),
+                parseFloat(document.getElementById('f_ชะลอการโอน').value || 0),
+                parseFloat(document.getElementById('f_รายการหัก').value || 0),
+                parseFloat(document.getElementById('f_หลักประกัน').value || 0),
+                parseFloat(document.getElementById('f_ภาษี').value || 0),
+                parseFloat(document.getElementById('f_คงเหลือ').value || 0),
+                parseFloat(document.getElementById('f_รอหักกลบ').value || 0),
+                parseFloat(document.getElementById('f_เงินโอน').value || 0),
+            ];
+
+            let payload = { action: actionType, data: formDataArray };
+            if(actionType === 'edit') {
+                payload.rowNum = document.getElementById('f_rowNum').value;
+            }
+
+            showLoading("กำลังบันทึกข้อมูล...");
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST', body: JSON.stringify(payload)
+                });
+                const resData = await res.json();
+                if(resData.status === 'success') {
+                    closeModal();
+                    Swal.fire('สำเร็จ', resData.message, 'success');
+                    fetchData();
+                } else throw new Error(resData.message);
+            } catch(err) {
+                Swal.fire('ผิดพลาด', err.message, 'error');
+            } finally { hideLoading(); }
+        };
+
+        // --- CSV Import ---
+        function setupCSVUpload() {
+            document.getElementById('csvFileInput').addEventListener('change', function(e) {
+                let file = e.target.files[0];
+                if(!file) return;
+
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: async function(results) {
+                        // Validate Headers structure briefly based on requirement
+                        const data = results.data;
+                        if(data.length > 0 && !data[0].hasOwnProperty('กองทุน')) {
+                            // Sometime users upload the original file which has 4 empty header rows.
+                            // We need to clean it before sending, or tell user to clean.
+                            Swal.fire('รูปแบบไฟล์ไม่ถูกต้อง', 'กรุณาลบหัวตารางที่ว่างด้านบนออก ให้เหลือเฉพาะแถวชื่อคอลัมน์ (ลำดับ, วันที่โอน...) ในบรรทัดแรก', 'error');
+                            return;
+                        }
+                        
+                        showLoading("กำลังซิงค์ข้อมูลใหม่ไปที่ระบบฐานข้อมูล...");
+                        try {
+                            const res = await fetch(API_URL, {
+                                method: 'POST', 
+                                body: JSON.stringify({ action: 'sync', data: data })
+                            });
+                            const resData = await res.json();
+                            if(resData.status === 'success') {
+                                Swal.fire('สำเร็จ', resData.message, 'success');
+                                fetchData(); // Reload to see new data
+                            } else throw new Error(resData.message);
+                        } catch(err) {
+                            Swal.fire('ผิดพลาด', err.message, 'error');
+                        } finally {
+                            hideLoading();
+                            document.getElementById('csvFileInput').value = ''; // clear input
+                        }
+                    }
+                });
+            });
+        }
+
+        // --- Excel Export ---
+        window.exportToExcel = function() {
+            if (!filteredData || filteredData.length === 0) {
+                Swal.fire('แจ้งเตือน', 'ไม่มีข้อมูลสำหรับส่งออก', 'info');
+                return;
+            }
+            
+            showLoading("กำลังสร้างไฟล์ Excel...");
+            
+            setTimeout(() => {
+                try {
+                    const exportData = filteredData.map(d => ({
+                        'ลำดับ': d['ลำดับ'] || '',
+                        'วันที่โอน': d['วันที่โอน'] || '',
+                        'Batch No.': d['Batch No.'] || '',
+                        'งวด/เลขที่เบิกจ่าย': d['งวด/เลขที่เบิกจ่าย'] || '',
+                        'รหัสผังบัญชี สป.สธ.': d['รหัสผังบัญชี สป.สธ.'] || '',
+                        'กองทุน': d['กองทุน'] || '',
+                        'กองทุนย่อยเฉพาะด้าน': d['กองทุนย่อยเฉพาะด้าน'] || '',
+                        'จำนวนเงิน': parseFloat(d['จำนวนเงิน']) || 0,
+                        'ชะลอการโอน': parseFloat(d['ชะลอการโอน']) || 0,
+                        'รายการหักจากยอดโอนเงิน': parseFloat(d['รายการหักจากยอดโอนเงิน']) || 0,
+                        'หลักประกันสัญญา': parseFloat(d['หลักประกันสัญญา']) || 0,
+                        'ภาษี': parseFloat(d['ภาษี']) || 0,
+                        'คงเหลือ': parseFloat(d['คงเหลือ']) || 0,
+                        'จำนวนเงินรอหักกลบ': parseFloat(d['จำนวนเงินรอหักกลบ']) || 0,
+                        'เงินโอนเข้าบัญชี': parseFloat(d['เงินโอนเข้าบัญชี']) || 0
+                    }));
+
+                    const ws = XLSX.utils.json_to_sheet(exportData);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Report Data");
+                    
+                    let today = new Date();
+                    let dd = String(today.getDate()).padStart(2, '0');
+                    let mm = String(today.getMonth() + 1).padStart(2, '0');
+                    let yyyy = today.getFullYear() + 543;
+                    let filename = `รายงานการโอนเงิน_${dd}-${mm}-${yyyy}.xlsx`;
+                    
+                    XLSX.writeFile(wb, filename);
+                } catch (error) {
+                    Swal.fire('ผิดพลาด', 'ไม่สามารถสร้างไฟล์ Excel ได้: ' + error.message, 'error');
+                } finally {
+                    hideLoading();
+                }
+            }, 500);
+        };
+
+        // --- Helpers ---
+        function showLoading(msg) {
+            document.getElementById('loadingText').innerText = msg;
+            document.getElementById('loadingOverlay').classList.remove('hidden');
+        }
+        function hideLoading() {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+        }
+        function formatNum(num) {
+            let n = parseFloat(num);
+            if (isNaN(n) || n === 0) return "0";
+            let abs = Math.abs(n);
+            if (abs >= 1000000) {
+                return Number((n / 1000000).toFixed(2)) + 'M';
+            } else if (abs >= 1000) {
+                return Number((n / 1000).toFixed(2)) + 'K';
+            }
+            return Number(n.toFixed(2)).toLocaleString('th-TH');
+        }
+        function parseThaiMonthYear(str) {
+            // Converts "ต.ค. 68" to integer for sorting. e.g. 256810
+            if(!str) return 0;
+            const thM = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+            let parts = str.split(' ');
+            if(parts.length < 2) return 0;
+            let mIdx = thM.indexOf(parts[0]) + 1;
+            let y = parseInt(parts[1].replace('25','').trim()); // handle 2568 or 68
+            return (y * 100) + mIdx;
+        }
+
+    })();
+    </script>
+</body>
+</html>
