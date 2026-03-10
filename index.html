@@ -277,7 +277,6 @@
     <script>
     (function() {
         // [SECURITY] Obfuscated Web App URL base64 encoded.
-        // แก้ไข: เติมตัวอักษร z กลับเข้าไปให้ตรงกับลิงก์ URL จริง
         const _O = "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy9BS2Z5Y2J6SGRLQTFFOXQ4TFpYZ3MxWm9xcXNxbllkNTAySHFQQ1RWUXpPS2kydDFFS1F6R0FPczQ5empzV1RSLUxaeTd6d3pYQS9leGVj";
         const API_URL = atob(_O); 
 
@@ -747,21 +746,31 @@
                 Papa.parse(file, {
                     header: true,
                     skipEmptyLines: true,
+                    beforeFirstChunk: function(chunk) {
+                        // ค้นหาบรรทัดที่เป็นหัวตารางเพื่อตัดข้อความ 4 บรรทัดบนสุดทิ้งอัตโนมัติ
+                        let lines = chunk.split(/\r?\n/);
+                        let headerIdx = lines.findIndex(line => line.startsWith('ลำดับ') || line.includes(',กองทุน,'));
+                        if (headerIdx > 0) {
+                            return lines.slice(headerIdx).join('\n');
+                        }
+                        return chunk;
+                    },
                     complete: async function(results) {
-                        // Validate Headers structure briefly based on requirement
-                        const data = results.data;
-                        if(data.length > 0 && !data[0].hasOwnProperty('กองทุน')) {
-                            // Sometime users upload the original file which has 4 empty header rows.
-                            // We need to clean it before sending, or tell user to clean.
-                            Swal.fire('รูปแบบไฟล์ไม่ถูกต้อง', 'กรุณาลบหัวตารางที่ว่างด้านบนออก ให้เหลือเฉพาะแถวชื่อคอลัมน์ (ลำดับ, วันที่โอน...) ในบรรทัดแรก', 'error');
+                        // กรองเอาเฉพาะข้อมูลจริงที่มีลำดับและกองทุน
+                        const data = results.data.filter(row => row['ลำดับ'] && row['กองทุน']);
+                        
+                        if(data.length === 0) {
+                            Swal.fire('รูปแบบไฟล์ไม่ถูกต้อง', 'ไม่พบข้อมูลตารางในไฟล์ CSV', 'error');
+                            document.getElementById('csvFileInput').value = '';
                             return;
                         }
                         
-                        showLoading("กำลังซิงค์ข้อมูลใหม่ไปที่ระบบฐานข้อมูล...");
+                        showLoading("กำลังลบข้อมูลเดิม และนำเข้าข้อมูลใหม่ทั้งหมด...");
                         try {
                             const res = await fetch(API_URL, {
                                 method: 'POST', 
-                                body: JSON.stringify({ action: 'sync', data: data })
+                                // ส่ง action เป็น 'replace' ตามที่ตั้งค่าไว้ใน Google Sheet
+                                body: JSON.stringify({ action: 'replace', data: data })
                             });
                             const resData = await res.json();
                             if(resData.status === 'success') {
